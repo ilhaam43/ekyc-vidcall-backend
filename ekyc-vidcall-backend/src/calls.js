@@ -4,6 +4,7 @@ import { assert } from '@ekyc/shared/errors';
 import { activeStates } from '@ekyc/shared/db';
 import { enqueue, audit } from '@ekyc/shared/outbox';
 import { hash } from '@ekyc/shared/auth';
+import { resolveRecordingBucket } from '@ekyc/shared/bank-storage';
 
 const terminal = ['completed', 'canceled', 'missed', 'failed'];
 function roomLabel(value) {
@@ -180,7 +181,8 @@ export class Calls {
     const callForKey = await this.db('platform_calls').where({ id: record.call_id }).first(); assert(callForKey, 404, 'CALL_NOT_FOUND');
     const expected = `${record.tenant_id}/${callForKey.user_id}/${record.call_id}/${record.id}.mp4`;
     assert(event.key === expected, 422, 'INVALID_OBJECT_KEY');
-      const actual = await this.storage.checksum(this.cfg.recordingBucket, expected);
+      const bucket = await resolveRecordingBucket(this.db, this.cfg, record.tenant_id, record);
+      const actual = await this.storage.checksum(bucket, expected);
       assert(actual.sha256 === event.sha256 && actual.bytes === event.bytes, 422, 'CHECKSUM_MISMATCH');
       assert(actual.bytes >= 100_000, 422, 'RECORDING_INCOMPLETE');
     return this.db.transaction(async trx => {
@@ -189,7 +191,7 @@ export class Calls {
       if (!await this.once(trx, event)) return call;
       assert(recording.started_at, 409, 'RECORDING_NEVER_STARTED');
       assert(['stopped', 'stored', 'failed'].includes(recording.state), 409, 'RECORDING_NOT_FINALIZED');
-      await trx('platform_recordings').where({ id: record.id }).update({ state: 'stored', object_key: expected, sha256: actual.sha256, bytes: actual.bytes, updated_at: new Date() });
+      await trx('platform_recordings').where({ id: record.id }).update({ state: 'stored', bucket, object_key: expected, sha256: actual.sha256, bytes: actual.bytes, updated_at: new Date() });
       if (call.state === 'completing') await enqueue(trx, 'verification', `${call.id}:verification`, { call_id: call.id, tenant_id: call.tenant_id, user_id: call.user_id, outcome: call.outcome });
       await audit(trx, call.tenant_id, null, call.user_id, 'recording.stored', { call_id: call.id, recording_id: record.id }); return call;
     });

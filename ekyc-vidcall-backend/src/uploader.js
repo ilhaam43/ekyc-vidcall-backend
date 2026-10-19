@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { assert } from '@ekyc/shared/errors';
 import { value } from '@ekyc/shared/config';
+import { resolveRecordingBucket } from '@ekyc/shared/bank-storage';
 export class Uploader {
   constructor(db, cfg, storage, calls) { this.db = db; this.cfg = cfg; this.storage = storage; this.calls = calls; this.root = path.resolve(value('RECORDING_STAGING_DIR', '/recordings')); }
   async upload({ recording_id, call_id }) {
@@ -32,8 +33,10 @@ export class Uploader {
     const settled = await lstat(file); assert(settled.size === stat.size, 503, 'RECORDING_FILE_PENDING');
     const localHash = createHash('sha256'); for await (const chunk of createReadStream(file)) localHash.update(chunk);
     const sha256 = localHash.digest('hex'); const key = `${call.tenant_id}/${call.user_id}/${call.id}/${recording.id}.mp4`;
-    await this.storage.uploadFile(this.cfg.recordingBucket, key, file, sha256);
-    const actual = await this.storage.checksum(this.cfg.recordingBucket, key);
+    const bucket = await resolveRecordingBucket(this.db, this.cfg, call.tenant_id, recording);
+    await this.db('platform_recordings').where({ id: recording.id }).whereNull('bucket').update({ bucket });
+    await this.storage.uploadFile(bucket, key, file, sha256);
+    const actual = await this.storage.checksum(bucket, key);
     assert(actual.sha256 === sha256 && actual.bytes === stat.size, 503, 'UPLOAD_CHECKSUM_MISMATCH');
     await this.calls.stored({ event_id: randomUUID(), recording_id, key, sha256, bytes: stat.size });
     // The database now points to a verified object. Only the exact file pair is removed.
