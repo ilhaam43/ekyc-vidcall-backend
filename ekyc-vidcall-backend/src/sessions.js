@@ -8,6 +8,7 @@ export class Sessions {
   constructor(db, cfg, calls) { this.db = db; this.cfg = cfg; this.calls = calls; }
   claims(session) { return { sub: session.subject_id, tenant_id: session.tenant_id, role: session.role, sid: session.id, source: session.source || 'basic', ...(session.call_id ? { call_id: session.call_id } : {}) }; }
   async create(role, subjectId, tenantId, trx = this.db, options = {}) {
+    if (role === 'customer') assert(await trx('platform_customers').where({ id: subjectId, tenant_id: tenantId }).whereNull('deleted_at').forUpdate().first(), 404, 'CUSTOMER_NOT_FOUND');
     const refresh = opaqueToken();
     const [session] = await trx('platform_sessions').insert({ id: randomUUID(), subject_id: subjectId, tenant_id: tenantId, role, refresh_hash: hash(refresh), call_id: options.call_id || null, source: options.source || 'basic', expires_at: new Date(Date.now() + 8 * 3600000) }).returning('*');
     return { session, refresh, token: issueToken(this.cfg, this.claims(session)) };
@@ -32,10 +33,11 @@ export class Sessions {
       return { session, refresh, token: issueToken(this.cfg, this.claims(session)) };
     });
   }
-  async grant(tenantId, userId) {
-    assert(await this.db('platform_customers').where({ id: userId, tenant_id: tenantId }).first(), 404, 'CUSTOMER_NOT_FOUND');
-    const grant = opaqueToken(); await this.db('platform_sessions').insert({ id: randomUUID(), subject_id: userId, tenant_id: tenantId, role: 'grant', refresh_hash: hash(grant), expires_at: new Date(Date.now() + 300000) });
-    return { code: grant, expires_in: 300, join_url: `${this.cfg.publicOrigin}/customer#code=${grant}` };
+  async grant(tenantId, userId, expiresIn = 300) {
+    assert(Number.isInteger(expiresIn) && expiresIn >= 60 && expiresIn <= 3600, 422, 'INVALID_GRANT_EXPIRY');
+    assert(await this.db('platform_customers').where({ id: userId, tenant_id: tenantId }).whereNull('deleted_at').first(), 404, 'CUSTOMER_NOT_FOUND');
+    const grant = opaqueToken(); await this.db('platform_sessions').insert({ id: randomUUID(), subject_id: userId, tenant_id: tenantId, role: 'grant', refresh_hash: hash(grant), expires_at: new Date(Date.now() + expiresIn * 1000) });
+    return { code: grant, expires_in: expiresIn, join_url: `${this.cfg.publicOrigin}/customer#code=${grant}` };
   }
   async integrationCustomerGrant(tenantId, userId, callId) {
     const code = opaqueToken();

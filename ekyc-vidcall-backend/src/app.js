@@ -50,7 +50,7 @@ export function createApp(db, cfg, storage) {
   app.post('/api/v2/sessions/agent/link', linkExchangeLimiter, async (req, res) => sessionReply(req, res, cfg, await sessions.exchangeAgentLink(req.body?.code, req.headers.origin)));
   app.post('/api/v2/integrations/queue-links', integrationLimiter, async (req, res) => send(res, await integration.queueLink(req.headers.authorization?.replace(/^Bearer /, ''), req.body || {})));
   app.post('/api/v2/integrations/customer-links', integrationLimiter, async (req, res) => send(res, await integration.customerLink(req.headers.authorization?.replace(/^Bearer /, ''), req.body || {})));
-  app.post('/api/v2/customer-grants', partner, async (req, res) => send(res, await sessions.grant(req.auth.tenant_id, req.body.user_id)));
+  app.post('/api/v2/customer-grants', partner, async (req, res) => send(res, await sessions.grant(req.auth.tenant_id, req.body.user_id, req.body.expires_in ?? 300)));
   app.post('/api/v2/customer-links', partner, async (req, res) => send(res, await sessions.deferredCustomerLink(req.auth.tenant_id, req.body.user_id, req.body.external_request_id)));
   app.post('/api/v2/sessions/customer', loginLimiter(), async (req, res) => sessionReply(req, res, cfg, await sessions.exchange(req.body.code)));
   app.post(['/v1/agents/logout', '/api/v2/sessions/logout'], member, async (req, res) => {

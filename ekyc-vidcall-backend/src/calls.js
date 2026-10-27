@@ -45,7 +45,7 @@ export class Calls {
       const tenant = await trx('platform_tenants').where({ id: actor.tenant_id, active: true }).forUpdate().first(); assert(tenant, 403, 'TENANT_INACTIVE');
       const prior = await trx('platform_calls').where({ tenant_id: actor.tenant_id, registration_key: key }).first();
       if (prior) { assert(prior.user_id === data.user_id && prior.source === source, 409, 'IDEMPOTENCY_KEY_REUSED'); return prior; }
-      const user = await trx('platform_customers').where({ id: data.user_id, tenant_id: actor.tenant_id }).first(); assert(user, 404, 'CUSTOMER_NOT_FOUND');
+      const user = await trx('platform_customers').where({ id: data.user_id, tenant_id: actor.tenant_id }).whereNull('deleted_at').first(); assert(user, 404, 'CUSTOMER_NOT_FOUND');
       const existing = await trx('platform_calls').where({ tenant_id: actor.tenant_id, user_id: data.user_id }).whereIn('state', activeStates).first();
       if (existing) {
         assert(existing.source === source, 409, 'CUSTOMER_ALREADY_QUEUED');
